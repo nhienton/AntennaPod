@@ -35,7 +35,6 @@ import de.danoeh.antennapod.core.event.DownloadEvent;
 import de.danoeh.antennapod.core.service.download.DownloadService;
 import de.danoeh.antennapod.core.service.download.DownloadRequestCreator;
 import de.danoeh.antennapod.core.feed.FeedUrlNotFoundException;
-import de.danoeh.antennapod.core.util.DownloadErrorLabel;
 import de.danoeh.antennapod.discovery.CombinedSearcher;
 import de.danoeh.antennapod.discovery.PodcastSearchResult;
 import de.danoeh.antennapod.event.FeedListUpdateEvent;
@@ -45,7 +44,7 @@ import de.danoeh.antennapod.core.glide.FastBlurTransformation;
 import de.danoeh.antennapod.core.preferences.PlaybackPreferences;
 import de.danoeh.antennapod.core.preferences.UserPreferences;
 import de.danoeh.antennapod.core.service.download.DownloadRequest;
-import de.danoeh.antennapod.model.download.DownloadStatus;
+import de.danoeh.antennapod.core.service.download.DownloadStatus;
 import de.danoeh.antennapod.core.service.download.Downloader;
 import de.danoeh.antennapod.core.service.download.HttpDownloader;
 import de.danoeh.antennapod.core.service.playback.PlaybackService;
@@ -54,7 +53,7 @@ import de.danoeh.antennapod.core.storage.DBWriter;
 import de.danoeh.antennapod.core.util.FileNameGenerator;
 import de.danoeh.antennapod.parser.feed.FeedHandler;
 import de.danoeh.antennapod.parser.feed.FeedHandlerResult;
-import de.danoeh.antennapod.model.download.DownloadError;
+import de.danoeh.antennapod.core.util.DownloadError;
 import de.danoeh.antennapod.core.util.IntentUtils;
 import de.danoeh.antennapod.core.util.StorageUtils;
 import de.danoeh.antennapod.core.util.URLChecker;
@@ -135,10 +134,10 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
         String feedUrl = null;
         if (getIntent().hasExtra(ARG_FEEDURL)) {
             feedUrl = getIntent().getStringExtra(ARG_FEEDURL);
-        } else if (TextUtils.equals(getIntent().getAction(), Intent.ACTION_SEND)) {
-            feedUrl = getIntent().getStringExtra(Intent.EXTRA_TEXT);
-        } else if (TextUtils.equals(getIntent().getAction(), Intent.ACTION_VIEW)) {
-            feedUrl = getIntent().getDataString();
+        } else if (TextUtils.equals(getIntent().getAction(), Intent.ACTION_SEND)
+                || TextUtils.equals(getIntent().getAction(), Intent.ACTION_VIEW)) {
+            feedUrl = TextUtils.equals(getIntent().getAction(), Intent.ACTION_SEND)
+                    ? getIntent().getStringExtra(Intent.EXTRA_TEXT) : getIntent().getDataString();
         }
 
         if (feedUrl == null) {
@@ -305,10 +304,10 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
             downloader.call();
             return downloader.getResult();
         })
-        .subscribeOn(Schedulers.io())
-        .observeOn(AndroidSchedulers.mainThread())
-        .subscribe(this::checkDownloadResult,
-                error -> Log.e(TAG, Log.getStackTraceString(error)));
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(this::checkDownloadResult,
+                        error -> Log.e(TAG, Log.getStackTraceString(error)));
     }
 
     private void checkDownloadResult(@NonNull DownloadStatus status) {
@@ -328,7 +327,7 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
                 dialog.show();
             }
         } else {
-            showErrorDialog(getString(DownloadErrorLabel.from(status.getReason())), status.getReasonDetailed());
+            showErrorDialog(status.getReason().getErrorString(OnlineFeedViewActivity.this), status.getReasonDetailed());
         }
     }
 
@@ -415,74 +414,142 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
      * Called when feed parsed successfully.
      * This method is executed on the GUI thread.
      */
-    private void showFeedInformation(final Feed feed, Map<String, String> alternateFeedUrls) {
+    private void setVisibility() {
         viewBinding.progressBar.setVisibility(View.GONE);
         viewBinding.feedDisplayContainer.setVisibility(View.VISIBLE);
+    }
+
+    private void showFeedFoundBySearch() {
         if (isFeedFoundBySearch) {
             int resId = R.string.no_feed_url_podcast_found_by_search;
             Snackbar.make(findViewById(android.R.id.content), resId, Snackbar.LENGTH_LONG).show();
         }
+    }
+
+    private void setFeedDownloadUrl(final Feed feed) {
         this.feed = feed;
         this.selectedDownloadUrl = feed.getDownload_url();
+    }
 
+    private void setColorFilter() {
         viewBinding.backgroundImage.setColorFilter(new LightingColorFilter(0xff828282, 0x000000));
+    }
 
+    private TextView updateListView() {
         View header = View.inflate(this, R.layout.onlinefeedview_header, null);
-
         viewBinding.listView.addHeaderView(header);
         viewBinding.listView.setSelector(android.R.color.transparent);
         viewBinding.listView.setAdapter(new FeedItemlistDescriptionAdapter(this, 0, feed.getItems()));
+        return header.findViewById(R.id.txtvDescription);
+    }
 
-        TextView description = header.findViewById(R.id.txtvDescription);
-
-        if (StringUtils.isNotBlank(feed.getImageUrl())) {
-            Glide.with(this)
-                    .load(feed.getImageUrl())
-                    .apply(new RequestOptions()
+    private void loadGlide() {
+        Glide.with(this)
+                .load(feed.getImageUrl())
+                .apply(new RequestOptions()
                         .placeholder(R.color.light_gray)
                         .error(R.color.light_gray)
                         .diskCacheStrategy(ApGlideSettings.AP_DISK_CACHE_STRATEGY)
                         .fitCenter()
                         .dontAnimate())
-                    .into(viewBinding.coverImage);
-            Glide.with(this)
-                    .load(feed.getImageUrl())
-                    .apply(new RequestOptions()
-                            .placeholder(R.color.image_readability_tint)
-                            .error(R.color.image_readability_tint)
-                            .diskCacheStrategy(ApGlideSettings.AP_DISK_CACHE_STRATEGY)
-                            .transform(new FastBlurTransformation())
-                            .dontAnimate())
-                    .into(viewBinding.backgroundImage);
-        }
+                .into(viewBinding.coverImage);
+        Glide.with(this)
+                .load(feed.getImageUrl())
+                .apply(new RequestOptions()
+                        .placeholder(R.color.image_readability_tint)
+                        .error(R.color.image_readability_tint)
+                        .diskCacheStrategy(ApGlideSettings.AP_DISK_CACHE_STRATEGY)
+                        .transform(new FastBlurTransformation())
+                        .dontAnimate())
+                .into(viewBinding.backgroundImage);
+    }
 
+    private void updateViewBinding() {
         viewBinding.titleLabel.setText(feed.getTitle());
         viewBinding.authorLabel.setText(feed.getAuthor());
-        description.setText(HtmlToPlainText.getPlainText(feed.getDescription()));
+    }
 
-        viewBinding.subscribeButton.setOnClickListener(v -> {
-            if (feedInFeedlist(feed)) {
-                openFeed();
-            } else {
-                Feed f = new Feed(selectedDownloadUrl, null, feed.getTitle());
-                f.setPreferences(feed.getPreferences());
-                this.feed = f;
-                DownloadService.download(this, false, DownloadRequestCreator.create(f).build());
-                didPressSubscribe = true;
-                handleUpdatedFeedStatus(feed);
-            }
-        });
+    private void getFeed() {
+        if (feedInFeedlist(feed)) {
+            openFeed();
+        } else {
+            Feed f = new Feed(selectedDownloadUrl, null, feed.getTitle());
+            f.setPreferences(feed.getPreferences());
+            this.feed = f;
+            DownloadService.download(this, false, DownloadRequestCreator.create(f).build());
+            didPressSubscribe = true;
+            handleUpdatedFeedStatus(feed);
+        }
+    }
 
-        viewBinding.stopPreviewButton.setOnClickListener(v -> {
-            PlaybackPreferences.writeNoMediaPlaying();
-            IntentUtils.sendLocalBroadcast(this, PlaybackService.ACTION_SHUTDOWN_PLAYBACK_SERVICE);
-        });
+    private void stopPreview() {
+        PlaybackPreferences.writeNoMediaPlaying();
+        IntentUtils.sendLocalBroadcast(this, PlaybackService.ACTION_SHUTDOWN_PLAYBACK_SERVICE);
+    }
 
+    private void autoDownload() {
         if (UserPreferences.isEnableAutodownload()) {
             SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
             viewBinding.autoDownloadCheckBox.setChecked(preferences.getBoolean(PREF_LAST_AUTO_DOWNLOAD, true));
         }
+    }
 
+    private void initializeAlternateList(Map<String, String> alternateFeedUrls, List<String> alternateUrlsList, List<String> alternateUrlsTitleList) {
+        alternateUrlsList.add(feed.getDownload_url());
+        alternateUrlsTitleList.add(feed.getTitle());
+
+        alternateUrlsList.addAll(alternateFeedUrls.keySet());
+        for (String url : alternateFeedUrls.keySet()) {
+            alternateUrlsTitleList.add(alternateFeedUrls.get(url));
+        }
+    }
+
+    private ArrayAdapter<String> createAdapter(List<String> alternateUrlsTitleList) {
+        return new ArrayAdapter<String>(this,
+                R.layout.alternate_urls_item, alternateUrlsTitleList) {
+            @Override
+            public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+                // reusing the old view causes a visual bug on Android <= 10
+                return super.getDropDownView(position, null, parent);
+            }
+        };
+    }
+
+    private void selectedListener(List<String> alternateUrlsList) {
+        viewBinding.alternateUrlsSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                selectedDownloadUrl = alternateUrlsList.get(position);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+
+            }
+        });
+    }
+
+    private void isNotBlank() {
+        if (StringUtils.isNotBlank(feed.getImageUrl())) {
+            loadGlide();
+        }
+    }
+
+    private void setTextDescription(TextView description) {
+        description.setText(HtmlToPlainText.getPlainText(feed.getDescription()));
+    }
+
+    private void viewBindingButtons() {
+        viewBinding.subscribeButton.setOnClickListener(v -> {
+            getFeed();
+        });
+
+        viewBinding.stopPreviewButton.setOnClickListener(v -> {
+            stopPreview();
+        });
+    }
+
+    private void setMaxLines(TextView description) {
         final int MAX_LINES_COLLAPSED = 10;
         description.setMaxLines(MAX_LINES_COLLAPSED);
         description.setOnClickListener(v -> {
@@ -492,7 +559,9 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
                 description.setMaxLines(2000);
             }
         });
+    }
 
+    private void checkAlternateFeedUrls(Map<String, String> alternateFeedUrls) {
         if (alternateFeedUrls.isEmpty()) {
             viewBinding.alternateUrlsSpinner.setVisibility(View.GONE);
         } else {
@@ -501,38 +570,36 @@ public class OnlineFeedViewActivity extends AppCompatActivity {
             final List<String> alternateUrlsList = new ArrayList<>();
             final List<String> alternateUrlsTitleList = new ArrayList<>();
 
-            alternateUrlsList.add(feed.getDownload_url());
-            alternateUrlsTitleList.add(feed.getTitle());
-
-
-            alternateUrlsList.addAll(alternateFeedUrls.keySet());
-            for (String url : alternateFeedUrls.keySet()) {
-                alternateUrlsTitleList.add(alternateFeedUrls.get(url));
-            }
-
-            ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
-                    R.layout.alternate_urls_item, alternateUrlsTitleList) {
-                @Override
-                public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                    // reusing the old view causes a visual bug on Android <= 10
-                    return super.getDropDownView(position, null, parent);
-                }
-            };
+            initializeAlternateList(alternateFeedUrls, alternateUrlsList, alternateUrlsTitleList);
+            ArrayAdapter<String> adapter = createAdapter(alternateUrlsList);
 
             adapter.setDropDownViewResource(R.layout.alternate_urls_dropdown_item);
             viewBinding.alternateUrlsSpinner.setAdapter(adapter);
-            viewBinding.alternateUrlsSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                    selectedDownloadUrl = alternateUrlsList.get(position);
-                }
-
-                @Override
-                public void onNothingSelected(AdapterView<?> parent) {
-
-                }
-            });
+            selectedListener(alternateUrlsList);
         }
+    }
+
+    private void showFeedInformation(final Feed feed, Map<String, String> alternateFeedUrls) {
+        setVisibility();
+        showFeedFoundBySearch();
+        setFeedDownloadUrl(feed);
+        setColorFilter();
+        updateListView();
+        TextView description = updateListView();
+
+        isNotBlank();
+
+        updateViewBinding();
+        setTextDescription(description);
+
+        viewBindingButtons();
+
+        autoDownload();
+        setMaxLines(description);
+
+        setTextDescription(description);
+
+        checkAlternateFeedUrls(alternateFeedUrls);
         handleUpdatedFeedStatus(feed);
     }
 
