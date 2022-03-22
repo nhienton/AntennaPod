@@ -67,6 +67,12 @@ public class LocalPSMP extends PlaybackServiceMediaPlayer {
     private volatile Pair<Integer, Integer> videoSize;
     private final AudioFocusRequestCompat audioFocusRequest;
 
+    private AbstractKeycodeStrategy strategy;
+    private final PlaybackPlayStrategy playStrategy = new PlaybackPlayStrategy();
+    private final PlaybackResumeStrategy resumeStrategy = new PlaybackResumeStrategy();
+    private final PlaybackPreparingStrategy preparingStrategy = new PlaybackPreparingStrategy();
+    private final PlaybackInitializedStrategy initializedStrategy = new PlaybackInitializedStrategy();
+
     /**
      * Some asynchronous calls might change the state of the MediaPlayer object. Therefore calls in other threads
      * have to wait until these operations have finished.
@@ -174,6 +180,26 @@ public class LocalPSMP extends PlaybackServiceMediaPlayer {
                 .setOnAudioFocusChangeListener(audioFocusChangeListener)
                 .setWillPauseWhenDucked(true)
                 .build();
+    }
+
+    public boolean setStrategy(PlayerStatus playerStatus) {
+        if (playerStatus == PlayerStatus.PLAYING) {
+            this.strategy = this.playStrategy;
+        } else if (playerStatus == PlayerStatus.PAUSED || playerStatus == PlayerStatus.PREPARED) {
+            this.strategy = this.resumeStrategy;
+        } else if (playerStatus == PlayerStatus.PREPARING) {
+            this.strategy = this.preparingStrategy;
+        } else if (playerStatus == PlayerStatus.INITIALIZED) {
+            this.strategy = this.initializedStrategy;
+        } else {
+            return false;
+        }
+
+        return true;
+    }
+
+    public void executeStrategy() {
+        this.strategy.execute(this);
     }
 
     /**

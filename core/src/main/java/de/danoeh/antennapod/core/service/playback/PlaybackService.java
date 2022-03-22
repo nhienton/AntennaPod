@@ -197,6 +197,8 @@ public class PlaybackService extends MediaBrowserServiceCompat {
 
     private String autoSkippedFeedMediaId = null;
 
+    private KeycodeStrategyFactory keycodeStrategyFactory = new KeycodeStrategyFactory();
+
     /**
      * Used for Lollipop notifications, Android Wear, and Android Auto.
      */
@@ -651,89 +653,8 @@ public class PlaybackService extends MediaBrowserServiceCompat {
         Log.d(TAG, "Handling keycode: " + keycode);
         final PlaybackServiceMediaPlayer.PSMPInfo info = mediaPlayer.getPSMPInfo();
         final PlayerStatus status = info.playerStatus;
-        switch (keycode) {
-            case KeyEvent.KEYCODE_HEADSETHOOK:
-            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                if (status == PlayerStatus.PLAYING) {
-                    mediaPlayer.pause(!UserPreferences.isPersistNotify(), false);
-                } else if (status == PlayerStatus.PAUSED || status == PlayerStatus.PREPARED) {
-                    mediaPlayer.resume();
-                } else if (status == PlayerStatus.PREPARING) {
-                    mediaPlayer.setStartWhenPrepared(!mediaPlayer.isStartWhenPrepared());
-                } else if (status == PlayerStatus.INITIALIZED) {
-                    mediaPlayer.setStartWhenPrepared(true);
-                    mediaPlayer.prepare();
-                } else if (mediaPlayer.getPlayable() == null) {
-                    startPlayingFromPreferences();
-                } else {
-                    return false;
-                }
-                taskManager.restartSleepTimer();
-                return true;
-            case KeyEvent.KEYCODE_MEDIA_PLAY:
-                if (status == PlayerStatus.PAUSED || status == PlayerStatus.PREPARED) {
-                    mediaPlayer.resume();
-                } else if (status == PlayerStatus.INITIALIZED) {
-                    mediaPlayer.setStartWhenPrepared(true);
-                    mediaPlayer.prepare();
-                } else if (mediaPlayer.getPlayable() == null) {
-                    startPlayingFromPreferences();
-                } else {
-                    return false;
-                }
-                taskManager.restartSleepTimer();
-                return true;
-            case KeyEvent.KEYCODE_MEDIA_PAUSE:
-                if (status == PlayerStatus.PLAYING) {
-                    mediaPlayer.pause(!UserPreferences.isPersistNotify(), false);
-                    return true;
-                }
-                return false;
-            case KeyEvent.KEYCODE_MEDIA_NEXT:
-                if (!notificationButton) {
-                    // Handle remapped button as notification button which is not remapped again.
-                    return handleKeycode(UserPreferences.getHardwareForwardButton(), true);
-                } else if (getStatus() == PlayerStatus.PLAYING || getStatus() == PlayerStatus.PAUSED) {
-                    mediaPlayer.skip();
-                    return true;
-                }
-                return false;
-            case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
-                if (getStatus() == PlayerStatus.PLAYING || getStatus() == PlayerStatus.PAUSED) {
-                    mediaPlayer.seekDelta(UserPreferences.getFastForwardSecs() * 1000);
-                    return true;
-                }
-                return false;
-            case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
-                if (!notificationButton) {
-                    // Handle remapped button as notification button which is not remapped again.
-                    return handleKeycode(UserPreferences.getHardwarePreviousButton(), true);
-                } else if (getStatus() == PlayerStatus.PLAYING || getStatus() == PlayerStatus.PAUSED) {
-                    mediaPlayer.seekTo(0);
-                    return true;
-                }
-                return false;
-            case KeyEvent.KEYCODE_MEDIA_REWIND:
-                if (getStatus() == PlayerStatus.PLAYING || getStatus() == PlayerStatus.PAUSED) {
-                    mediaPlayer.seekDelta(-UserPreferences.getRewindSecs() * 1000);
-                    return true;
-                }
-                return false;
-            case KeyEvent.KEYCODE_MEDIA_STOP:
-                if (status == PlayerStatus.PLAYING) {
-                    mediaPlayer.pause(true, true);
-                }
-
-                stateManager.stopForeground(true); // gets rid of persistent notification
-                return true;
-            default:
-                Log.d(TAG, "Unhandled key code: " + keycode);
-                if (info.playable != null && info.playerStatus == PlayerStatus.PLAYING) {   // only notify the user about an unknown key event if it is actually doing something
-                    String message = String.format(getResources().getString(R.string.unknown_media_key), keycode);
-                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-                }
-        }
-        return false;
+        AbstractKeycodeStrategy keycodeStrategy = keycodeStrategyFactory.createStrategy(keycode, status, notificationButton);
+        return keycodeStrategy.execute(mediaPlayer);
     }
 
     private void startPlayingFromPreferences() {
@@ -1643,10 +1564,6 @@ public class PlaybackService extends MediaBrowserServiceCompat {
 
     public PlaybackServiceMediaPlayer.PSMPInfo getPSMPInfo() {
         return mediaPlayer.getPSMPInfo();
-    }
-
-    public PlayerStatus getStatus() {
-        return mediaPlayer.getPlayerStatus();
     }
 
     public Playable getPlayable() {
