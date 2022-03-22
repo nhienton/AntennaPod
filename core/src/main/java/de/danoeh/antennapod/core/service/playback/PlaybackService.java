@@ -82,7 +82,6 @@ import de.danoeh.antennapod.core.util.gui.NotificationUtils;
 import de.danoeh.antennapod.core.util.playback.PlayableUtils;
 import de.danoeh.antennapod.core.util.playback.PlaybackServiceStarter;
 import de.danoeh.antennapod.core.widget.WidgetUpdater;
-import de.danoeh.antennapod.model.feed.Chapter;
 import de.danoeh.antennapod.model.feed.Feed;
 import de.danoeh.antennapod.model.feed.FeedItem;
 import de.danoeh.antennapod.model.feed.FeedMedia;
@@ -108,12 +107,8 @@ public class PlaybackService extends MediaBrowserServiceCompat {
     private static final String TAG = "PlaybackService";
 
     public static final String EXTRA_PLAYABLE = "PlaybackService.PlayableExtra";
-    public static final String EXTRA_SHOULD_STREAM = "extra.de.danoeh.antennapod.core.service.shouldStream";
     public static final String EXTRA_ALLOW_STREAM_THIS_TIME = "extra.de.danoeh.antennapod.core.service.allowStream";
     public static final String EXTRA_ALLOW_STREAM_ALWAYS = "extra.de.danoeh.antennapod.core.service.allowStreamAlways";
-    public static final String EXTRA_START_WHEN_PREPARED = "extra.de.danoeh.antennapod.core.service.startWhenPrepared";
-
-    public static final String EXTRA_PREPARE_IMMEDIATELY = "extra.de.danoeh.antennapod.core.service.prepareImmediately";
 
     public static final String ACTION_PLAYER_STATUS_CHANGED = "action.de.danoeh.antennapod.core.service.playerStatusChanged";
     private static final String AVRCP_ACTION_PLAYER_STATUS_CHANGED = "com.android.music.playstatechanged";
@@ -524,23 +519,12 @@ public class PlaybackService extends MediaBrowserServiceCompat {
                 }
             } else {
                 stateManager.validStartCommandWasReceived();
-                boolean stream = intent.getBooleanExtra(EXTRA_SHOULD_STREAM, true);
                 boolean allowStreamThisTime = intent.getBooleanExtra(EXTRA_ALLOW_STREAM_THIS_TIME, false);
                 boolean allowStreamAlways = intent.getBooleanExtra(EXTRA_ALLOW_STREAM_ALWAYS, false);
-                boolean startWhenPrepared = intent.getBooleanExtra(EXTRA_START_WHEN_PREPARED, false);
-                boolean prepareImmediately = intent.getBooleanExtra(EXTRA_PREPARE_IMMEDIATELY, false);
                 sendNotificationBroadcast(NOTIFICATION_TYPE_RELOAD, 0);
                 if (allowStreamAlways) {
                     UserPreferences.setAllowMobileStreaming(true);
                 }
-                boolean localFeed = URLUtil.isContentUrl(playable.getStreamUrl());
-                if (stream && !NetworkUtils.isStreamingAllowed() && !allowStreamThisTime && !localFeed) {
-                    displayStreamingNotAllowedNotification(intent);
-                    PlaybackPreferences.writeNoMediaPlaying();
-                    stateManager.stopService();
-                    return Service.START_NOT_STICKY;
-                }
-
                 Observable.fromCallable(
                         () -> {
                             if (playable instanceof FeedMedia) {
@@ -552,15 +536,8 @@ public class PlaybackService extends MediaBrowserServiceCompat {
                         .subscribeOn(Schedulers.io())
                         .observeOn(AndroidSchedulers.mainThread())
                         .subscribe(
-                                playableLoaded -> {
-                                    if (!playable.getIdentifier().equals(
-                                            PlaybackPreferences.getCurrentlyPlayingFeedMediaId())) {
-                                        PlaybackPreferences.clearCurrentlyPlayingTemporaryPlaybackSpeed();
-                                    }
-                                    mediaPlayer.playMediaObject(playableLoaded, stream, startWhenPrepared,
-                                            prepareImmediately);
-                                    addPlayableToQueue(playableLoaded);
-                                }, error -> {
+                                loadedPlayable -> startPlaying(loadedPlayable, allowStreamThisTime),
+                                error -> {
                                     Log.d(TAG, "Playable was not found. Stopping service.");
                                     error.printStackTrace();
                                     stateManager.stopService();
@@ -662,30 +639,34 @@ public class PlaybackService extends MediaBrowserServiceCompat {
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(
-                        playable -> {
-                            boolean localFeed = URLUtil.isContentUrl(playable.getStreamUrl());
-                            if (PlaybackPreferences.getCurrentEpisodeIsStream()
-                                    && !NetworkUtils.isStreamingAllowed() && !localFeed) {
-                                displayStreamingNotAllowedNotification(
-                                        new PlaybackServiceStarter(this, playable)
-                                                .prepareImmediately(true)
-                                                .startWhenPrepared(true)
-                                                .shouldStream(true)
-                                                .getIntent());
-                                PlaybackPreferences.writeNoMediaPlaying();
-                                stateManager.stopService();
-                                return;
-                            }
-                            mediaPlayer.playMediaObject(playable, PlaybackPreferences.getCurrentEpisodeIsStream(),
-                                    true, true);
-                            stateManager.validStartCommandWasReceived();
-                            updateNotificationAndMediaSession(playable);
-                            addPlayableToQueue(playable);
-                        }, error -> {
+                        playable -> startPlaying(playable, false),
+                        error -> {
                             Log.d(TAG, "Playable was not loaded from preferences. Stopping service.");
                             error.printStackTrace();
                             stateManager.stopService();
                         });
+    }
+
+    private void startPlaying(Playable playable, boolean allowStreamThisTime) {
+        boolean localFeed = URLUtil.isContentUrl(playable.getStreamUrl());
+        boolean stream = !playable.localFileAvailable() || localFeed;
+        if (stream && !localFeed && !NetworkUtils.isStreamingAllowed() && !allowStreamThisTime) {
+            displayStreamingNotAllowedNotification(
+                    new PlaybackServiceStarter(this, playable)
+                            .getIntent());
+            PlaybackPreferences.writeNoMediaPlaying();
+            stateManager.stopService();
+            return;
+        }
+
+        if (!playable.getIdentifier().equals(PlaybackPreferences.getCurrentlyPlayingFeedMediaId())) {
+            PlaybackPreferences.clearCurrentlyPlayingTemporaryPlaybackSpeed();
+        }
+
+        mediaPlayer.playMediaObject(playable, stream, true, true);
+        stateManager.validStartCommandWasReceived();
+        updateNotificationAndMediaSession(playable);
+        addPlayableToQueue(playable);
     }
 
     /**
@@ -713,7 +694,7 @@ public class PlaybackService extends MediaBrowserServiceCompat {
         @Override
         public WidgetUpdater.WidgetState requestWidgetState() {
             return new WidgetUpdater.WidgetState(getPlayable(), getStatus(),
-                    getCurrentPosition(), getDuration(), getCurrentPlaybackSpeed(), isCasting());
+                    getCurrentPosition(), getDuration(), getCurrentPlaybackSpeed());
         }
 
         @Override
@@ -735,7 +716,7 @@ public class PlaybackService extends MediaBrowserServiceCompat {
             switch (newInfo.playerStatus) {
                 case INITIALIZED:
                     PlaybackPreferences.writeMediaPlaying(mediaPlayer.getPSMPInfo().playable,
-                            mediaPlayer.getPSMPInfo().playerStatus, mediaPlayer.isStreaming());
+                            mediaPlayer.getPSMPInfo().playerStatus);
                     updateNotificationAndMediaSession(newInfo.playable);
                     break;
                 case PREPARED:
@@ -926,7 +907,7 @@ public class PlaybackService extends MediaBrowserServiceCompat {
 
         if (!UserPreferences.isFollowQueue()) {
             Log.d(TAG, "getNextInQueue(), but follow queue is not enabled.");
-            PlaybackPreferences.writeMediaPlaying(nextItem.getMedia(), PlayerStatus.STOPPED, false);
+            PlaybackPreferences.writeMediaPlaying(nextItem.getMedia(), PlayerStatus.STOPPED);
             updateNotificationAndMediaSession(nextItem.getMedia());
             return null;
         }
@@ -935,9 +916,6 @@ public class PlaybackService extends MediaBrowserServiceCompat {
                 && UserPreferences.isFollowQueue() && !nextItem.getFeed().isLocalFeed()) {
             displayStreamingNotAllowedNotification(
                     new PlaybackServiceStarter(this, nextItem.getMedia())
-                            .prepareImmediately(true)
-                            .startWhenPrepared(true)
-                            .shouldStream(true)
                             .getIntent());
             PlaybackPreferences.writeNoMediaPlaying();
             stateManager.stopService();
@@ -1033,7 +1011,7 @@ public class PlaybackService extends MediaBrowserServiceCompat {
                     || autoSkipped
                     || (skipped && !UserPreferences.shouldSkipKeepEpisode())) {
                 // only mark the item as played if we're not keeping it anyways
-                DBWriter.markItemPlayed(item, FeedItem.PLAYED, ended);
+                DBWriter.markItemPlayed(item, FeedItem.PLAYED, ended || (skipped && smartMarkAsPlayed));
                 // don't know if it actually matters to not autodownload when smart mark as played is triggered
                 DBWriter.removeQueueItem(PlaybackService.this, ended, item);
                 // Delete episode if enabled
@@ -1601,21 +1579,12 @@ public class PlaybackService extends MediaBrowserServiceCompat {
         mediaPlayer.setStartWhenPrepared(s);
     }
 
-
     public void seekTo(final int t) {
         mediaPlayer.seekTo(t);
     }
 
-
     private void seekDelta(final int d) {
         mediaPlayer.seekDelta(d);
-    }
-
-    /**
-     * Seek to the start of the specified chapter.
-     */
-    public void seekToChapter(Chapter c) {
-        seekTo((int) c.getStart());
     }
 
     /**
@@ -1722,8 +1691,7 @@ public class PlaybackService extends MediaBrowserServiceCompat {
             Log.d(TAG, "onPlayFromMediaId: mediaId: " + mediaId + " extras: " + extras.toString());
             FeedMedia p = DBReader.getFeedMedia(Long.parseLong(mediaId));
             if (p != null) {
-                mediaPlayer.playMediaObject(p, !p.localFileAvailable(), true, true);
-                addPlayableToQueue(p);
+                startPlaying(p, false);
             }
         }
 
@@ -1731,11 +1699,10 @@ public class PlaybackService extends MediaBrowserServiceCompat {
         public void onPlayFromSearch(String query, Bundle extras) {
             Log.d(TAG, "onPlayFromSearch  query=" + query + " extras=" + extras.toString());
 
-            List<FeedItem> results = FeedSearcher.searchFeedItems(getBaseContext(), query, 0);
+            List<FeedItem> results = FeedSearcher.searchFeedItems(query, 0);
             if (results.size() > 0 && results.get(0).getMedia() != null) {
                 FeedMedia media = results.get(0).getMedia();
-                mediaPlayer.playMediaObject(media, !media.localFileAvailable(), true, true);
-                addPlayableToQueue(media);
+                startPlaying(media, false);
                 return;
             }
             onPlay();
