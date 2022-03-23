@@ -52,6 +52,10 @@ public abstract class PlaybackServiceMediaPlayer {
         playerStatus = PlayerStatus.STOPPED;
     }
 
+    public abstract boolean setStrategy(PlayerStatus playerStatus);
+
+    public abstract void executeStrategy();
+
     /**
      * Starts or prepares playback of the specified Playable object. If another Playable object is already being played, the currently playing
      * episode will be stopped and replaced with the new Playable object. If the Playable object is already being played, the method will
