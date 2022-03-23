@@ -47,10 +47,11 @@ public class WidgetUpdaterWorker extends Worker {
     private void updateWidget() {
         final Playable media = PlayableUtils.createInstanceFromPreferences(getApplicationContext());
         if (media != null) {
+            MediaInfo mediaInfo = new MediaInfo(media.getPosition(), media.getDuration(),
+                    PlaybackSpeedUtils.getCurrentPlaybackSpeed(media));
             WidgetUpdater.updateWidget(getApplicationContext(),
                     new WidgetUpdater.WidgetState(media, PlayerStatus.STOPPED,
-                            media.getPosition(), media.getDuration(),
-                            PlaybackSpeedUtils.getCurrentPlaybackSpeed(media)));
+                            mediaInfo));
         } else {
             WidgetUpdater.updateWidget(getApplicationContext(),
                     new WidgetUpdater.WidgetState(PlayerStatus.STOPPED));

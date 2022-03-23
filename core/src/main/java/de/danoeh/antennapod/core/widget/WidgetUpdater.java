@@ -46,16 +46,16 @@ public abstract class WidgetUpdater {
         final int duration;
         final float playbackSpeed;
 
-        public WidgetState(Playable media, PlayerStatus status, int position, int duration, float playbackSpeed) {
+        public WidgetState(Playable media, PlayerStatus status, MediaInfo mediaInfo) {
             this.media = media;
             this.status = status;
-            this.position = position;
-            this.duration = duration;
-            this.playbackSpeed = playbackSpeed;
+            this.position = mediaInfo.position;
+            this.duration = mediaInfo.duration;
+            this.playbackSpeed = mediaInfo.playbackSpeed;
         }
 
         public WidgetState(PlayerStatus status) {
-            this(null, status, Playable.INVALID_TIME, Playable.INVALID_TIME, 1.0f);
+            this(null, status, new MediaInfo(Playable.INVALID_TIME, Playable.INVALID_TIME, 1.0f));
         }
     }
 

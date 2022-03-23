@@ -44,6 +44,7 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.preference.PreferenceManager;
 
+import de.danoeh.antennapod.core.widget.MediaInfo;
 import de.danoeh.antennapod.event.playback.BufferUpdateEvent;
 import de.danoeh.antennapod.event.playback.PlaybackServiceEvent;
 import de.danoeh.antennapod.event.PlayerErrorEvent;
@@ -693,8 +694,8 @@ public class PlaybackService extends MediaBrowserServiceCompat {
 
         @Override
         public WidgetUpdater.WidgetState requestWidgetState() {
-            return new WidgetUpdater.WidgetState(getPlayable(), getStatus(),
-                    getCurrentPosition(), getDuration(), getCurrentPlaybackSpeed());
+            MediaInfo mediaInfo = new MediaInfo(getCurrentPosition(), getDuration(), getCurrentPlaybackSpeed());
+            return new WidgetUpdater.WidgetState(getPlayable(), getStatus(), mediaInfo);
         }
 
         @Override
